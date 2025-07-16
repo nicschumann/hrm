@@ -1,0 +1,10 @@
+[workspace]
+authors = ["nicschumann <nic@nicschumann.co>"]
+channels = ["conda-forge"]
+name = "hrm"
+platforms = ["osx-arm64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]

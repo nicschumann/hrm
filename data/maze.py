@@ -6,12 +6,16 @@ Avi Schwarzschild
 June 2021
 """
 
+# NOTE(Nic): I modified the data loader a bit to remove redundant signals
+# from the source representation (9x9 mazes are represented as 24x24 images with double-wide pathways, for example.)
+
 import os
 import os.path
 from typing import Optional, Callable
 
 import numpy as np
 import torch
+from torch.nn.functional import max_pool2d
 
 from data.utils import download_url, extract_zip
 
@@ -51,8 +55,14 @@ class MazeDataset(torch.utils.data.Dataset):
         inputs_np = np.load(inputs_path)
         targets_np = np.load(solutions_path)
 
-        self.inputs = torch.from_numpy(inputs_np).float()
-        self.targets = torch.from_numpy(targets_np).long()
+        # NOTE(Nic): effectively convert 2px-wide pathways into 1px wide.
+        self.inputs = max_pool2d(
+            torch.from_numpy(inputs_np[:, :, 1:-1, 1:-1]).float(), (2, 2), 2, padding=0
+        )
+
+        self.targets = max_pool2d(
+            torch.from_numpy(targets_np[:, 1:-1, 1:-1]).long(), (2, 2), 2, padding=0
+        )
 
     def __getitem__(self, index):
         img, target = self.inputs[index], self.targets[index]

@@ -11,7 +11,10 @@ import os
 import os.path
 import tarfile
 import urllib.request as ur
+import torch
 
+import numpy as np
+from imageio import imsave
 from tqdm import tqdm
 
 GBFACTOR = float(1 << 30)
@@ -65,3 +68,8 @@ def makedirs(path):
     except OSError as e:
         if e.errno != errno.EEXIST and os.path.isdir(path):
             raise e
+
+
+def save_image(path: str, image: torch.Tensor):
+    formatted_image = (image.permute(1, 2, 0) * 255.0).cpu().numpy().astype(np.uint8)
+    imsave(path, formatted_image)

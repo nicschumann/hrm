@@ -2,9 +2,19 @@
 authors = ["nicschumann <nic@nicschumann.co>"]
 channels = ["conda-forge"]
 name = "hrm"
-platforms = ["osx-arm64"]
+platforms = ["osx-arm64", "linux-64"]
 version = "0.1.0"
 
-[tasks]
-
 [dependencies]
+python = ">=3.11,<3.13"
+tqdm = ">=4.67.1,<5"
+numpy = ">=2.3.1,<3"
+
+[pypi-dependencies]
+torch = { version = ">=2.5.1", index = "https://download.pytorch.org/whl/cu124"}
+torchvision = { version = ">=0.20.1", index = "https://download.pytorch.org/whl/cu124"}
+
+[target.osx.pypi-dependencies]
+# NOTE(Nic): For OSX, install the CPU version of pytorch.
+torch = { version = ">=2.5.1", index = "https://download.pytorch.org/whl/cpu" }
+torchvision = { version = ">=0.20.1", index = "https://download.pytorch.org/whl/cpu" }

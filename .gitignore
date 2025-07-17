@@ -1,2 +1,12 @@
+# python ignores
+*.pyc
+__pycache__
+.venv
+.env
+
+
 # pixi environments
 .pixi
+
+# data downloades
+cache

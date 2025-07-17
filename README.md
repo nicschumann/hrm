@@ -4,4 +4,4 @@ An implementation of [Hierarchical Reasoning Model](https://arxiv.org/pdf/2506.2
 
 ## References
 
-- Schwartzschild et al. Datasets for Studying Generalization from Easy to Hard Examples. [here](https://arxiv.org/pdf/2108.06011). _Used this as a source of training data for maze problems._
+- Schwartzschild et al. Datasets for Studying Generalization from Easy to Hard Examples. [here](https://arxiv.org/pdf/2108.06011). _Used this as a source of training data for maze problems in particular. See `data/` for usage!_

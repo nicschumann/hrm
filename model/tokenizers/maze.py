@@ -57,7 +57,7 @@ class MazeTokenizer(nn.Module):
             output_grid[ignore_mask] = OutputTokens.IGNORE
             output_grid[route_mask] = OutputTokens.ROUTE
 
-            print(output_grid)
+            output_grid = output_grid.reshape(B, -1)
         else:
             output_grid = None
 

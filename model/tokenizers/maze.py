@@ -1,22 +1,22 @@
 import torch
 import torch.nn as nn
-from enum import IntEnum
+from enum import IntEnum, auto
 
 
 class InputTokens(IntEnum):
     PAD = 0
-    WALL = 1
-    PATH = 2
-    SOURCE_POS = 3
-    TARGET_POS = 4
-    NEW_LINE = 5
+    WALL = auto()
+    PATH = auto()
+    SOURCE_POS = auto()
+    TARGET_POS = auto()
+    NEW_LINE = auto()
 
 
 class OutputTokens(IntEnum):
     PAD = 0
-    IGNORE = 2
-    ROUTE = 3
-    NEW_LINE = 4
+    IGNORE = auto()
+    ROUTE = auto()
+    NEW_LINE = auto()
 
 
 class MazeTokenizer(nn.Module):

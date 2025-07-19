@@ -23,3 +23,5 @@ if __name__ == "__main__":
     y.unsqueeze_(0)  # NOTE(Nic): add batch dim for testing.
 
     x_seq, y_seq = tokenizer(x, y)
+
+    print(x_seq)

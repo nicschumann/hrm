@@ -4,9 +4,13 @@ __pycache__
 .venv
 .env
 
+# macOS
+.DS_Store
+
 
 # pixi environments
 .pixi
 
 # data downloades
 cache
+test-data

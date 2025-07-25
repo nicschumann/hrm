@@ -1,9 +1,7 @@
 from data.maze import MazeDataset
 from data.utils import save_image
 from model.tokenizers.maze import MazeTokenizer, InputTokens, OutputTokens
-from model.input import InputNetwork
-from model.recurrence import RecurrentModule, get_dummy_vars
-from model.output import OutputNetwork
+from model import HRM, HRMConfig
 
 if __name__ == "__main__":
     d_train = MazeDataset("./cache", train=True)
@@ -13,13 +11,12 @@ if __name__ == "__main__":
 
     tokenizer = MazeTokenizer()
 
-    f_input = InputNetwork(len(InputTokens), d_model, max_seq)
-    f_rec = RecurrentModule(d_model, 4, d_model)
-    f_output = OutputNetwork(d_model, len(OutputTokens), max_seq)
+    config = HRMConfig(
+        len(InputTokens), len(OutputTokens), d_model, max_seq_len=max_seq
+    )
+    hrm = HRM(config)
 
-    print(f"input params: {sum(p.numel() for p in f_input.parameters()):,}")
-    print(f"rec params: {sum(p.numel() for p in f_rec.parameters()):,}")
-    print(f"out params: {sum(p.numel() for p in f_output.parameters()):,}")
+    print(f"hrm params: {sum(p.numel() for p in hrm.parameters()):,}")
 
     x, y = d_train[0]
     save_image("test-data/train.png", x)
@@ -36,19 +33,13 @@ if __name__ == "__main__":
     y.unsqueeze_(0)  # NOTE(Nic): add batch dim for testing.
 
     x_seq, y_seq = tokenizer(x, y)
-    x_prime = f_input(x_seq)
+    pred_logits = hrm(x_seq, y_seq.size(1))
 
-    z_h, z_l = get_dummy_vars(d_model)
+    loss = hrm.loss(y_seq, pred_logits)
+    print(loss)
 
-    print("encoded_seq", x_prime.shape)
-    print("z_h", z_h.shape)
-    print("z_l", z_l.shape)
-
-    z_out = f_rec(z_l, z_h, x_prime)
-    pred_logits = f_output(z_out, y_seq.shape[1])
-
-    print("z_out", z_out.shape)
-    print("pred", pred_logits.shape)
-    print(pred_logits.argmax(dim=-1).shape)
+    print("inp", x_seq.shape, x_seq.dtype)
+    print("tar", y_seq.shape, y_seq.dtype)
+    print("pred", pred_logits.shape, pred_logits.dtype)
 
     # batch_size, seq_len, d_model = x_prime.shape

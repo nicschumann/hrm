@@ -4,9 +4,6 @@ import torch.nn as nn
 from typing import Optional
 
 
-# NOTE(Nic@10)
-
-
 class OutputNetwork(nn.Module):
     def __init__(
         self, d_model: int, vocab_size: int, max_seq_len: int, stablemax: bool = False
@@ -18,6 +15,7 @@ class OutputNetwork(nn.Module):
         self.use_stablemax = stablemax
 
         self.proj = nn.Linear(d_model, self.max_seq_len * self.vocab_size, bias=False)
+        nn.init.trunc_normal_(self.proj.weight, std=0.02)
 
     def forward(self, z_h: torch.Tensor, seq_len: Optional[int] = None):
         B, D = z_h.shape

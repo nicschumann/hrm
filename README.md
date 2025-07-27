@@ -5,3 +5,7 @@ An implementation of [Hierarchical Reasoning Model](https://arxiv.org/pdf/2506.2
 ## References
 
 - Schwartzschild et al. Datasets for Studying Generalization from Easy to Hard Examples. [here](https://arxiv.org/pdf/2108.06011). _Used this as a source of training data for maze problems in particular. See `data/` for usage!_
+
+- Su et al. RoFormer: Enhanced Transformer with Rotary Position Embedding. [here](https://arxiv.org/pdf/2104.09864). _Just a callback to the implementation of RoPE, which is used for positional encoding in the paper. Note that we use the `lucidrains` implementation of rotary embeddings: [here](https://github.com/lucidrains/rotary-embedding-torch)._
+
+- Prieto et al. Grokking at the edge of Numerical Stability. [here](https://arxiv.org/html/2501.04697v1). _Used for the introduction of the StableMax activation. StableMax reference implementation [here](https://github.com/QuixiAI/stablemax-orthogonal)_

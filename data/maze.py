@@ -11,16 +11,17 @@ June 2021
 
 import os
 import os.path
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple
 
 import numpy as np
 import torch
 from torch.nn.functional import max_pool2d
+from torch.utils.data import Dataset, DataLoader
 
 from data.utils import download_url, extract_zip
 
 
-class MazeDataset(torch.utils.data.Dataset):
+class MazeDataset(Dataset):
     """This is a dataset class for mazes.
     padding and cropping is done correctly within this class for small and large mazes.
     """

@@ -11,7 +11,7 @@ class InputNetwork(nn.Module):
         # Definition
         self.d_model = d_model
         self.emb = nn.Embedding(vocab_size, d_model)
-        self.rope = RotaryEmbedding(dim=d_model)
+        self.pos = nn.Embedding(seq_len, d_model)
         self.proj = nn.Linear(d_model, d_model, bias=False)
 
         # Initialization
@@ -22,7 +22,7 @@ class InputNetwork(nn.Module):
 
         # NOTE(Nic): sqrt scaling is not explicitly mentioned in the paper
         x = self.emb(tokens) * math.sqrt(self.d_model)
-        x = self.rope.rotate_queries_or_keys(x)
+        x += self.pos(torch.arange(S, dtype=torch.long)) * math.sqrt(self.d_model)
         x = self.proj(x)
 
         return x

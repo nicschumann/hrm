@@ -94,29 +94,11 @@ class RecurrentModule(nn.Module):
             if isinstance(module, nn.Linear):
                 nn.init.trunc_normal_(module.weight, std=0.02)
 
-    def forward(
-        self, z: torch.Tensor, z_other: torch.Tensor, x: torch.Tensor
-    ) -> torch.Tensor:
-        B, S, D = x.shape
-        assert D == self.d_model
+    def forward(self, z: torch.Tensor, z_other: torch.Tensor) -> torch.Tensor:
 
-        # NOTE(Nic): expand hidden states to match the sequence length and combine
-        # z, z_other : (B, d_model)
-        z_seq = z.unsqueeze(1).expand(-1, S, -1)
-        z_other_seq = z.unsqueeze(1).expand(-1, S, -1)
-        combined_seq = x + z_seq + z_other_seq
+        combined_seq = z + z_other
 
         for layer in self.layers:
             combined_seq = layer(combined_seq)
 
-        z_new = combined_seq.mean(dim=1)  # sequence-wise average pooling
-        z_new = self.proj(z_new)
-
-        return z_new
-
-
-def get_dummy_vars(d_model: int):
-    z_h = torch.randn(1, d_model) * 0.02
-    z_l = torch.randn(1, d_model) * 0.02
-
-    return z_h, z_l
+        return combined_seq

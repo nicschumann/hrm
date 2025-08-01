@@ -21,12 +21,38 @@ class OutputTokens(IntEnum):
 
 class MazeTokenizer(nn.Module):
 
+    # This function takes an output sequence of tokens produced by the model
+    # and converts it back into a 2D image that can be viewed as a maze.
+    def untokenize(self, tokens: torch.Tensor, grid_size=(9, 9)):
+        assert (
+            tokens.dim() == 2
+        ), f"expecting a batched token sequence B, S, got a tensor with dim={tokens.dim()}"
+        B, S = tokens.shape
+        W, H = grid_size
+
+        # NOTE(Nic): We need to account for 1px of padding all around the maze
+        # So a 9x9 maze is represented as an 11x11 image, due to the border.
+        # We represent new lines with explicit newline tokens in tokenization,
+        # so we need to reshape into W,H = 9 + 2, 9 + 3.
+        tokens_2d = tokens.reshape(B, W + 2, H + 3)
+        # Now that we have newlines structurally, we can drop the last column.
+        tokens_2d = tokens_2d[:, :, :-1]
+
+        images = torch.zeros(
+            3, B, W + 2, H + 2
+        )  # (C, B, W, H), channels before batch for ease of indexing...
+
+        route_mask = torch.where(tokens_2d == OutputTokens.ROUTE)
+        images[0][route_mask] = 1.0  # just red for now
+        images = images.permute(1, 0, 2, 3)  # B, C, W, H
+
+        return images
+
     def forward(self, x: torch.Tensor, y: torch.Tensor | None = None):
         assert x.dim() == 4, f"expecting B, C, W, H, got a tensor with dim={x.dim()}"
         B, C, W, H = x.shape
         assert C == 3, f"expecting 3-channel maze images, but got ({B}, {C}, {W}, {H})"
 
-        # input_seqs = torch.full((B, W, H + 1), fill_value=InputTokens.PAD)
         input_grid = torch.full((B, W, H + 1), fill_value=InputTokens.NEW_LINE)
         wall_mask = torch.where(
             (x[:, 0, :, :] == 0) & (x[:, 1, :, :] == 0) & (x[:, 2, :, :] == 0)

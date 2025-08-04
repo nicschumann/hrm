@@ -1,6 +1,7 @@
 from data.maze import MazeDataset
 from model.tokenizers.maze import MazeTokenizer, InputTokens, OutputTokens
-from model import HRM, HRMConfig, train_loop
+from model.hrm import HRM, HRMConfig
+from model import train_loop
 
 if __name__ == "__main__":
     train_data = MazeDataset("./cache", train=True)
@@ -17,6 +18,4 @@ if __name__ == "__main__":
 
     print(f"hrm params: {sum(p.numel() for p in hrm.parameters()):,}")
 
-    train_loop(hrm, tokenizer, train_data, test_data)
-
-    # batch_size, seq_len, d_model = x_prime.shape
+    train_loop(hrm, tokenizer, train_data, test_data, M=4)

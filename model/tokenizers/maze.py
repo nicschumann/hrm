@@ -23,7 +23,12 @@ class MazeTokenizer(nn.Module):
 
     # This function takes an output sequence of tokens produced by the model
     # and converts it back into a 2D image that can be viewed as a maze.
-    def untokenize(self, tokens: torch.Tensor, grid_size=(9, 9)):
+    def untokenize(
+        self,
+        tokens: torch.Tensor,
+        targets: torch.Tensor,
+        grid_size=(9, 9),
+    ):
         assert (
             tokens.dim() == 2
         ), f"expecting a batched token sequence B, S, got a tensor with dim={tokens.dim()}"
@@ -35,15 +40,34 @@ class MazeTokenizer(nn.Module):
         # We represent new lines with explicit newline tokens in tokenization,
         # so we need to reshape into W,H = 9 + 2, 9 + 3.
         tokens_2d = tokens.reshape(B, W + 2, H + 3)
+        targets_2d = targets.reshape(B, W + 2, H + 3)
         # Now that we have newlines structurally, we can drop the last column.
         tokens_2d = tokens_2d[:, :, :-1]
+        targets_2d = targets_2d[:, :, :-1]
 
         images = torch.zeros(
             3, B, W + 2, H + 2
         )  # (C, B, W, H), channels before batch for ease of indexing...
 
-        route_mask = torch.where(tokens_2d == OutputTokens.ROUTE)
-        images[0][route_mask] = 1.0  # just red for now
+        true_mask = torch.where(targets_2d == OutputTokens.ROUTE)
+        images[0][true_mask] = 0.65  # set the true route to white
+        images[1][true_mask] = 0.65  # set the true route to white
+        images[2][true_mask] = 0.65  # set the true route to white
+
+        true_pos_mask = torch.where(
+            (tokens_2d == targets_2d) & (tokens_2d == OutputTokens.ROUTE)
+        )
+        images[0][true_pos_mask] = 0.0
+        images[1][true_pos_mask] = 1.0
+        images[2][true_pos_mask] = 1.0  # set correct preditions to green
+
+        false_pos_mask = torch.where(
+            (tokens_2d != targets_2d) & (tokens_2d == OutputTokens.ROUTE)
+        )
+        images[0][false_pos_mask] = 1.0
+        images[1][false_pos_mask] = 0.5
+        images[2][false_pos_mask] = 0.0  # set incorrect preditions to red
+
         images = images.permute(1, 0, 2, 3)  # B, C, W, H
 
         return images

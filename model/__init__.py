@@ -88,6 +88,7 @@ def train_loop(
 
         num_batches = len(train_loader)
         vis_every = math.floor(num_batches * 0.05)
+
         for i, (x_img, y_img) in enumerate(train_loader):
             x_seq, y_seq = tokenizer(x_img, y_img)
 
@@ -140,7 +141,7 @@ def train_loop(
 
                 num_samples = 5
                 y_pred_indices = torch.argmax(y_pred, dim=-1)
-                y_pred_imgs = tokenizer.untokenize(y_pred_indices)
+                y_pred_imgs = tokenizer.untokenize(y_pred_indices, y_seq)
                 debug_image_arr = torch.concat(
                     (x_img[:num_samples], y_pred_imgs[:num_samples]), dim=0
                 )
@@ -149,7 +150,7 @@ def train_loop(
                     f"./test-data/test-{epoch}-{i}.png",
                     nrow=num_samples,
                     padding=1,
-                    pad_value=0.5,
+                    pad_value=0.25,
                 )
 
         avg_trn_loss = (
@@ -189,16 +190,18 @@ def train_loop(
                 if (i + 1) % vis_every == 0:
                     num_samples = 5
                     y_val_pred_indices = torch.argmax(y_val_pred, dim=-1)
-                    y_val_pred_imgs = tokenizer.untokenize(y_val_pred_indices)
+                    y_val_pred_imgs = tokenizer.untokenize(
+                        y_val_pred_indices, y_val_seq
+                    )
                     val_debug_image_arr = torch.concat(
                         (x_val_img[:num_samples], y_val_pred_imgs[:num_samples]), dim=0
                     )
                     save_image(
                         val_debug_image_arr,
-                        f"./test-data/test-val-{epoch}-{i}.png",
+                        f"./test-data/test-{epoch}-val-{i}.png",
                         nrow=num_samples,
                         padding=1,
-                        pad_value=0.5,
+                        pad_value=0.25,
                     )
 
             avg_val_loss = (

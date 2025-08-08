@@ -1,5 +1,8 @@
 import math
 import torch
+import wandb
+from dataclasses import dataclass
+
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -10,7 +13,14 @@ from data.maze import MazeDataset
 from model.tokenizers.maze import MazeTokenizer, OutputTokens
 
 
-from model.hrm import HRM
+from model.hrm import HRM, HRMConfig
+
+
+@dataclass
+class TrainConfig:
+    lr: float
+    batch_size: int
+    epochs: int
 
 
 def accuracies(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
@@ -58,19 +68,43 @@ def train_loop(
     epochs: int = 1000,
     train_split: float = 0.75,
 ):
-    batch_size = 128
+
+    train_config = TrainConfig(lr=1e-4, batch_size=128, epochs=100)
+
     opt = optim.AdamW(hrm.parameters(), lr=1e-4)
 
     train_split_subset, val_split_subset = random_split(
         train_samples, [train_split, 1 - train_split]
     )
 
-    train_loader = DataLoader(train_split_subset, batch_size=batch_size)
-    val_loader = DataLoader(val_split_subset, batch_size=batch_size)
-    test_loader = DataLoader(test_samples, batch_size=batch_size)
+    train_loader = DataLoader(train_split_subset, batch_size=train_config.batch_size)
+    val_loader = DataLoader(val_split_subset, batch_size=train_config.batch_size)
+    test_loader = DataLoader(test_samples, batch_size=train_config.batch_size)
+    train_loader_length = len(train_loader)
+    num_train_samples = train_loader_length * train_config.batch_size
+    num_val_samples = len(val_loader) * train_config.batch_size
+    num_test_samples = len(test_loader) * train_config.batch_size
+
+    wandb_run = wandb.init(
+        entity="type-tools",
+        project="hrm",
+        config={
+            "lr": train_config.lr,
+            "batch-size": train_config.batch_size,
+            "hrm/params": sum(p.numel() for p in hrm.parameters()),
+            "hrm/N": hrm.config.N,
+            "hrm/T": hrm.config.T,
+            "hrm/M": M,
+            "maze-dims": (9, 9),
+            "train-samples": num_train_samples,
+            "val-samples": num_val_samples,
+            "test-samples": num_test_samples,
+            "epochs": 100,
+        },
+    )
 
     print(
-        f"train samples: ~{len(train_loader) * batch_size:,} | val samples: ~{len(val_loader) * batch_size:,} | test samples: ~{len(test_loader) * batch_size:,}"
+        f"train samples: ~{num_train_samples:,} | val samples: ~{num_val_samples:,} | test samples: ~{num_test_samples:,}"
     )
 
     train_losses: list[float] = []
@@ -79,8 +113,10 @@ def train_loop(
     val_accuracies: list[float] = []
     supervision_losses: list[float] = []
     supervision_accuracies: list[float] = []
+    zH_deltas: list[float] = []
+    zL_deltas: list[float] = []
 
-    for epoch in range(epochs):
+    for epoch in range(train_config.epochs):
 
         train_losses.clear()
         train_accuracies.clear()
@@ -90,6 +126,9 @@ def train_loop(
         vis_every = math.floor(num_batches * 0.05)
 
         for i, (x_img, y_img) in enumerate(train_loader):
+            # NOTE(Nic): We use the sample_index as the global step for indexing our metrics
+            # NOTE(Nic): We report batch statistics for the last segment in each train batch, but only validation averages.
+            sample_index = epoch * train_loader_length + i
             x_seq, y_seq = tokenizer(x_img, y_img)
 
             z = hrm.initial_state(x_seq)
@@ -133,6 +172,23 @@ def train_loop(
                     + " " * 10,
                     end="\r",
                 )
+
+            wandb_run.log(
+                data={
+                    "epoch": epoch,
+                    "sample_step": sample_index,
+                    "train/loss": supervision_losses[-1],
+                    "train/acc": supervision_accuracies[-1],
+                    "train/grad-norm": grad_norm,
+                    "train/segment-loss-delta": supervision_losses[-1]
+                    - supervision_losses[0],
+                    "train/segment-acc-delta": supervision_accuracies[-1]
+                    - supervision_accuracies[0],
+                },
+                step=sample_index,
+                # NOTE(Nic): if we're on the last train sample, don't commit yet, cause we have val data to add later.
+                commit=sample_index < train_loader_length - 1,
+            )
 
             train_losses.extend(supervision_losses)
             train_accuracies.extend(supervision_accuracies)
@@ -215,3 +271,15 @@ def train_loop(
             print(
                 f"\n[val] epoch: {epoch}/{epochs} | avg loss: {avg_val_loss:.4f} | avg acc: {avg_val_acc*100:.1f}%"
             )
+
+            wandb_run.log(
+                data={
+                    "val/loss": avg_val_loss,
+                    "val/acc": avg_val_acc,
+                },
+                step=sample_index,
+                # NOTE(Nic): if we're on the last train sample, don't commit yet, cause we have val data to add later.
+                commit=True,
+            )
+
+    wandb_run.finish()

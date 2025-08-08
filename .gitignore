@@ -14,3 +14,6 @@ __pycache__
 # data downloades
 cache
 test-data
+
+# logging
+wandb

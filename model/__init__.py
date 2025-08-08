@@ -173,18 +173,26 @@ def train_loop(
                     end="\r",
                 )
 
+            log_data = {
+                "epoch": epoch,
+                "sample_step": sample_index,
+                "train/loss": supervision_losses[-1],
+                "train/acc": supervision_accuracies[-1],
+                "train/grad-norm": grad_norm,
+            }
+
+            # NOTE(Nic): record all the segment deltas so we can see
+            # how the indiviudal segments are converging.
+            for i in range(1, M):
+                log_data[f"train/segment-{i + 1}-loss-delta"] = (
+                    supervision_losses[i] - supervision_losses[0]
+                )
+                log_data[f"train/segment-{i + 1}-acc-delta"] = (
+                    supervision_accuracies[i] - supervision_accuracies[0]
+                )
+
             wandb_run.log(
-                data={
-                    "epoch": epoch,
-                    "sample_step": sample_index,
-                    "train/loss": supervision_losses[-1],
-                    "train/acc": supervision_accuracies[-1],
-                    "train/grad-norm": grad_norm,
-                    "train/segment-loss-delta": supervision_losses[-1]
-                    - supervision_losses[0],
-                    "train/segment-acc-delta": supervision_accuracies[-1]
-                    - supervision_accuracies[0],
-                },
+                data=log_data,
                 step=sample_index,
                 # NOTE(Nic): if we're on the last train sample, don't commit yet, cause we have val data to add later.
                 commit=sample_index < train_loader_length - 1,
@@ -222,6 +230,7 @@ def train_loop(
         )
 
         val_losses.clear()
+        val_accuracies.clear()
         hrm.eval()
 
         with torch.no_grad():

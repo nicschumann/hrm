@@ -15,6 +15,7 @@ wandb = ">=0.20.1,<0.22"
 [pypi-dependencies]
 torch = { version = ">=2.5.1", index = "https://download.pytorch.org/whl/cu124"}
 torchvision = { version = ">=0.20.1", index = "https://download.pytorch.org/whl/cu124"}
+rotary-embedding-torch = { version = ">=0.8.8"}
 
 [target.osx.pypi-dependencies]
 # NOTE(Nic): For OSX, install the CPU version of pytorch.

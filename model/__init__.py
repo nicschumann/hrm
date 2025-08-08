@@ -2,6 +2,7 @@ import math
 import torch
 import wandb
 from dataclasses import dataclass
+from typing import Literal
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,6 +15,78 @@ from model.tokenizers.maze import MazeTokenizer, OutputTokens
 
 
 from model.hrm import HRM, HRMConfig
+
+
+SplitType = Literal["train"] | Literal["val"]
+MetricType = Literal["acc"] | Literal["loss"]
+
+
+class SegmentMetrics:
+    # NOTE(Nic): segment_* members contain M arrays, one for each segment.
+    # each array carries a list of losses for that segment in a given epoch.
+    M: int
+    segments: dict[MetricType, dict[SplitType, list[list[float]]]]
+
+    def __init__(self, M: int = 4):
+        self.M = M
+        self.segments = {
+            "loss": {
+                "train": [[] for _ in range(M)],
+                "val": [[] for _ in range(M)],
+            },
+            "acc": {
+                "train": [[] for _ in range(M)],
+                "val": [[] for _ in range(M)],
+            },
+        }
+
+    def add_segment_values(
+        self,
+        values: list[float],
+        split: SplitType = "train",
+        metric: MetricType = "loss",
+    ):
+        assert (
+            len(values) == self.M
+        ), f"expected length={self.M} segment metrics, but got {len(values)}"
+
+        for m, value in enumerate(values):
+            self.segments[metric][split][m].append(value)
+
+    def get_segments(
+        self, index: int = -1, split: SplitType = "train", metric: MetricType = "loss"
+    ) -> list[float]:
+        data = self.segments[metric][split]
+        return [data[m][index] for m in range(self.M) if len(data[m]) > index]
+
+    def get_metrics(
+        self, index: int = -1, split: SplitType = "train", metric: MetricType = "loss"
+    ) -> dict[str, float]:
+        segs_at_index = self.get_segments(index, split, metric)
+        assert len(segs_at_index) == self.M
+        return {
+            f"{split}/segment-{m+1}-{metric}": segs_at_index[m] for m in range(self.M)
+        }
+
+    def get_average_metrics(
+        self, split: SplitType = "train", metric: MetricType = "loss"
+    ) -> dict[str, float]:
+        return {
+            f"{split}/segment-{m+1}-avg-{metric}": sum(self.segments[metric][split][m])
+            / len(self.segments[metric][split][m])
+            for m in range(self.M)
+        }
+
+    def clear(self, split: SplitType = "train", metric: MetricType = "loss"):
+        for m in range(self.M):
+            self.segments[metric][split][m].clear()
+
+    def clear_all(self):
+        splits: list[SplitType] = ["train", "val"]
+        metrics: list[MetricType] = ["loss", "acc"]
+        for split in splits:
+            for metric in metrics:
+                self.clear(split, metric)
 
 
 @dataclass
@@ -65,13 +138,13 @@ def train_loop(
     train_samples: MazeDataset,
     test_samples: MazeDataset,
     M: int = 4,  # NOTE(Nic): number of supervision steps
-    epochs: int = 1000,
+    epochs: int = 100,
     train_split: float = 0.75,
 ):
 
-    train_config = TrainConfig(lr=1e-4, batch_size=128, epochs=100)
+    train_config = TrainConfig(lr=1e-4, batch_size=128, epochs=epochs)
 
-    opt = optim.AdamW(hrm.parameters(), lr=1e-4)
+    opt = optim.AdamW(hrm.parameters(), lr=train_config.lr)
 
     train_split_subset, val_split_subset = random_split(
         train_samples, [train_split, 1 - train_split]
@@ -99,7 +172,7 @@ def train_loop(
             "train-samples": num_train_samples,
             "val-samples": num_val_samples,
             "test-samples": num_test_samples,
-            "epochs": 100,
+            "epochs": train_config.epochs,
         },
     )
 
@@ -107,21 +180,15 @@ def train_loop(
         f"train samples: ~{num_train_samples:,} | val samples: ~{num_val_samples:,} | test samples: ~{num_test_samples:,}"
     )
 
-    train_losses: list[float] = []
-    train_accuracies: list[float] = []
-    val_losses: list[float] = []
-    val_accuracies: list[float] = []
-    supervision_losses: list[float] = []
-    supervision_accuracies: list[float] = []
-    zH_deltas: list[float] = []
-    zL_deltas: list[float] = []
+    segment_metrics = SegmentMetrics(M=M)
+    segment_losses: list[float] = []
+    segment_accuracies: list[float] = []
 
     for epoch in range(train_config.epochs):
 
-        train_losses.clear()
-        train_accuracies.clear()
         hrm.train()
-
+        # NOTE(Nic): clear old segments from the tracker.
+        segment_metrics.clear_all()
         num_batches = len(train_loader)
         vis_every = math.floor(num_batches * 0.05)
 
@@ -133,8 +200,8 @@ def train_loop(
 
             z = hrm.initial_state(x_seq)
 
-            supervision_losses.clear()
-            supervision_accuracies.clear()
+            segment_losses.clear()
+            segment_accuracies.clear()
 
             for m in range(M):
                 z, y_pred = hrm.segment(z, x_seq)
@@ -155,13 +222,18 @@ def train_loop(
                 grad_norm = nn.utils.clip_grad_norm_(hrm.parameters(), 1.0)
                 opt.step()
 
-                supervision_losses.append(loss.item())
-                supervision_accuracies.append(acc.item())
+                # NOTE(Nic): add results of this segment on this batch to the tracker.
+
+                segment_losses.append(loss.item())
+                segment_accuracies.append(acc.item())
+
+                # NOTE(Nic): log out the results of this segment to stdout
+
                 loss_list = ", ".join(
                     list(
                         map(
-                            lambda x: f"{x[1]:.4f} ({supervision_accuracies[x[0]] * 100:.1f}%)",
-                            enumerate(supervision_losses),
+                            lambda x: f"{x[1]:.4f} ({segment_accuracies[x[0]] * 100:.1f}%)",
+                            enumerate(segment_losses),
                         )
                     )
                 )
@@ -173,23 +245,29 @@ def train_loop(
                     end="\r",
                 )
 
-            log_data = {
+                # end stdout log
+
+            segment_metrics.add_segment_values(
+                segment_losses, split="train", metric="loss"
+            )
+            segment_metrics.add_segment_values(
+                segment_accuracies, split="train", metric="acc"
+            )
+
+            # NOTE(Nic): Log a single batch's worth of segments to wandb...
+
+            base_log_data = {
                 "epoch": epoch,
                 "sample_step": sample_index,
-                "train/loss": supervision_losses[-1],
-                "train/acc": supervision_accuracies[-1],
-                "train/grad-norm": grad_norm,
+                "train/grad-norm": grad_norm.item(),
             }
 
-            # NOTE(Nic): record all the segment deltas so we can see
-            # how the indiviudal segments are converging.
-            for i in range(1, M):
-                log_data[f"train/segment-{i + 1}-loss-delta"] = (
-                    supervision_losses[i] - supervision_losses[0]
-                )
-                log_data[f"train/segment-{i + 1}-acc-delta"] = (
-                    supervision_accuracies[i] - supervision_accuracies[0]
-                )
+            segments_loss_data = segment_metrics.get_metrics(
+                split="train", metric="loss"
+            )
+            segments_acc_data = segment_metrics.get_metrics(split="train", metric="acc")
+
+            log_data = base_log_data | segments_loss_data | segments_acc_data
 
             wandb_run.log(
                 data=log_data,
@@ -198,8 +276,9 @@ def train_loop(
                 commit=sample_index < train_loader_length - 1,
             )
 
-            train_losses.extend(supervision_losses)
-            train_accuracies.extend(supervision_accuracies)
+            # end wandb log
+
+            # NOTE(Nic): periodically log some images out for reference.
 
             if (i + 1) % vis_every == 0:
 
@@ -217,41 +296,56 @@ def train_loop(
                     pad_value=0.25,
                 )
 
-        avg_trn_loss = (
-            sum(train_losses) / len(train_losses) if len(train_losses) > 0 else 0
-        )
-        avg_trn_acc = (
-            sum(train_accuracies) / len(train_accuracies)
-            if len(train_accuracies) > 0
-            else 0
-        )
+        avg_trn_loss = segment_metrics.get_average_metrics(
+            split="train", metric="loss"
+        )[f"train/segment-{M}-avg-loss"]
+
+        avg_trn_acc = segment_metrics.get_average_metrics(split="train", metric="acc")[
+            f"train/segment-{M}-avg-acc"
+        ]
+
         print(
-            f"\n[trn] epoch: {epoch}/{epochs} | avg loss: {avg_trn_loss:.4f} | avg acc: {avg_trn_acc*100:.1f}%"
+            f"\n[trn] epoch: {epoch}/{epochs} | seg {M} avg loss: {avg_trn_loss:.4f} | seg {M} avg acc: {avg_trn_acc*100:.1f}%"
         )
 
-        val_losses.clear()
-        val_accuracies.clear()
         hrm.eval()
 
         with torch.no_grad():
             for i, (x_val_img, y_val_img) in enumerate(val_loader):
                 x_val_seq, y_val_seq = tokenizer(x_val_img, y_val_img)
-                y_val_pred = hrm.forward(x_val_seq, M=M)  # NOTE(Nic): does M segments
-                val_loss = F.cross_entropy(
-                    y_val_pred.reshape(-1, len(OutputTokens)),
-                    y_val_seq.reshape(-1),
-                    # ignore_index=OutputTokens.IGNORE,
+                z_val = hrm.initial_state(x_val_seq)
+
+                segment_losses.clear()
+                segment_accuracies.clear()
+
+                for m in range(M):
+
+                    z_val, y_val_pred = hrm.segment(z_val, x_val_seq)
+                    val_loss = F.cross_entropy(
+                        y_val_pred.reshape(-1, len(OutputTokens)),
+                        y_val_seq.reshape(-1),
+                        # ignore_index=OutputTokens.IGNORE,
+                    )
+                    val_acc = accuracies(y_val_pred, y_val_seq).mean()
+
+                    segment_losses.append(val_loss.item())
+                    segment_accuracies.append(val_acc.item())
+
+                segment_metrics.add_segment_values(
+                    segment_losses, split="val", metric="loss"
                 )
-                val_acc = accuracies(y_val_pred, y_val_seq).mean()
-                val_accuracies.append(val_acc.item())
-                val_losses.append(val_loss.item())
+
+                segment_metrics.add_segment_values(
+                    segment_accuracies, split="val", metric="acc"
+                )
 
                 print(
-                    f"[val] epoch: {epoch}/{epochs} | iter: {i}/{len(val_loader)} | final seg: {val_loss.item():.4f} ({val_acc.item()*100:.1f}%)"
+                    f"[val] epoch: {epoch}/{epochs} | iter: {i}/{len(val_loader)} | seg {M}: {val_loss.item():.4f} ({val_acc.item()*100:.1f}%)"
                     + " " * 10,
                     end="\r",
                 )
 
+                # NOTE(Nic): occasionally save some val images
                 if (i + 1) % vis_every == 0:
                     num_samples = 5
                     y_val_pred_indices = torch.argmax(y_val_pred, dim=-1)
@@ -269,23 +363,29 @@ def train_loop(
                         pad_value=0.25,
                     )
 
-            avg_val_loss = (
-                sum(val_losses) / len(val_losses) if len(val_losses) > 0 else 0
-            )
-            avg_val_acc = (
-                sum(val_accuracies) / len(val_accuracies)
-                if len(val_accuracies) > 0
-                else 0
-            )
-            print(
-                f"\n[val] epoch: {epoch}/{epochs} | avg loss: {avg_val_loss:.4f} | avg acc: {avg_val_acc*100:.1f}%"
+            avg_val_loss = segment_metrics.get_average_metrics(
+                split="val", metric="loss"
             )
 
+            avg_val_acc = segment_metrics.get_average_metrics(split="val", metric="acc")
+
+            avg_train_loss = segment_metrics.get_average_metrics(
+                split="train", metric="loss"
+            )
+
+            avg_train_acc = segment_metrics.get_average_metrics(
+                split="train", metric="acc"
+            )
+
+            print(
+                f"\n[val] epoch: {epoch}/{epochs} | avg loss: {avg_val_loss[f"val/segment-{M}-avg-loss"]:.4f} | avg acc: {avg_val_acc[f"val/segment-{M}-avg-acc"]*100:.1f}%"
+            )
+
+            # NOTE(Nic): send the epoch summary stats over for both validation and training
+            val_log_data = avg_val_loss | avg_val_acc | avg_train_loss | avg_train_acc
+
             wandb_run.log(
-                data={
-                    "val/loss": avg_val_loss,
-                    "val/acc": avg_val_acc,
-                },
+                data=val_log_data,
                 step=sample_index,
                 # NOTE(Nic): if we're on the last train sample, don't commit yet, cause we have val data to add later.
                 commit=True,

@@ -34,6 +34,7 @@ class MazeTokenizer(nn.Module):
         ), f"expecting a batched token sequence B, S, got a tensor with dim={tokens.dim()}"
         B, S = tokens.shape
         W, H = grid_size
+        device = tokens.device
 
         # NOTE(Nic): We need to account for 1px of padding all around the maze
         # So a 9x9 maze is represented as an 11x11 image, due to the border.
@@ -46,7 +47,7 @@ class MazeTokenizer(nn.Module):
         targets_2d = targets_2d[:, :, :-1]
 
         images = torch.zeros(
-            3, B, W + 2, H + 2
+            3, B, W + 2, H + 2, device=device
         )  # (C, B, W, H), channels before batch for ease of indexing...
 
         true_mask = torch.where(targets_2d == OutputTokens.ROUTE)
@@ -76,8 +77,11 @@ class MazeTokenizer(nn.Module):
         assert x.dim() == 4, f"expecting B, C, W, H, got a tensor with dim={x.dim()}"
         B, C, W, H = x.shape
         assert C == 3, f"expecting 3-channel maze images, but got ({B}, {C}, {W}, {H})"
+        device = x.device
 
-        input_grid = torch.full((B, W, H + 1), fill_value=InputTokens.NEW_LINE)
+        input_grid = torch.full(
+            (B, W, H + 1), fill_value=InputTokens.NEW_LINE, device=device
+        )
         wall_mask = torch.where(
             (x[:, 0, :, :] == 0) & (x[:, 1, :, :] == 0) & (x[:, 2, :, :] == 0)
         )
@@ -101,7 +105,9 @@ class MazeTokenizer(nn.Module):
             B_out, W_out, H_out = y.shape
             assert B_out == B and W_out == W and H_out == H
 
-            output_grid = torch.full_like(input_grid, fill_value=OutputTokens.NEW_LINE)
+            output_grid = torch.full_like(
+                input_grid, fill_value=OutputTokens.NEW_LINE, device=device
+            )
             ignore_mask = torch.where(y == 0)
             route_mask = torch.where(y == 1)
             output_grid[ignore_mask] = OutputTokens.IGNORE

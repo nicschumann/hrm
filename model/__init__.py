@@ -110,14 +110,14 @@ def accuracies(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
 
     total_route_tokens = (
         (all_route_tokens == OutputTokens.ROUTE)
-        .type(torch.uint32)
+        .type(torch.int32)
         .sum(dim=-1)
         .type(torch.float32)
     )
 
     correct_route_tokens = (
         ((pred_tokens == y_true) & (y_true == OutputTokens.ROUTE))
-        .type(torch.uint32)
+        .type(torch.int32)
         .sum(dim=-1)
         .type(torch.float32)
     )
@@ -132,6 +132,10 @@ def accuracies(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
     return accuracies
 
 
+def get_device() -> str:
+    return "mps" if torch.mps.is_available() else "cpu"
+
+
 def train_loop(
     hrm: HRM,
     tokenizer: MazeTokenizer,
@@ -142,12 +146,14 @@ def train_loop(
     train_split: float = 0.75,
 ):
 
+    device = get_device()
+
     train_config = TrainConfig(lr=1e-4, batch_size=128, epochs=epochs)
 
     opt = optim.AdamW(hrm.parameters(), lr=train_config.lr)
 
-    train_split_subset, val_split_subset = random_split(
-        train_samples, [train_split, 1 - train_split]
+    train_split_subset, val_split_subset, _ = random_split(
+        train_samples, [1024, 8192, len(train_samples) - 9216]
     )
 
     train_loader = DataLoader(train_split_subset, batch_size=train_config.batch_size)
@@ -157,6 +163,10 @@ def train_loop(
     num_train_samples = train_loader_length * train_config.batch_size
     num_val_samples = len(val_loader) * train_config.batch_size
     num_test_samples = len(test_loader) * train_config.batch_size
+
+    target_train_samples = 3_112_704
+    samples_per_epoch = num_train_samples
+    target_epochs = math.ceil(target_train_samples / samples_per_epoch)
 
     wandb_run = wandb.init(
         entity="type-tools",
@@ -172,7 +182,8 @@ def train_loop(
             "train-samples": num_train_samples,
             "val-samples": num_val_samples,
             "test-samples": num_test_samples,
-            "epochs": train_config.epochs,
+            "epochs": target_epochs,
+            "device": device,
         },
     )
 
@@ -184,19 +195,23 @@ def train_loop(
     segment_losses: list[float] = []
     segment_accuracies: list[float] = []
 
-    for epoch in range(train_config.epochs):
+    hrm = hrm.to(device)
+
+    for epoch in range(target_epochs):
 
         hrm.train()
         # NOTE(Nic): clear old segments from the tracker.
         segment_metrics.clear_all()
-        num_batches = len(train_loader)
-        vis_every = math.floor(num_batches * 0.05)
+        vis_every_train = max(math.floor(len(train_loader) * 0.05), 1)
+        vis_every_val = max(math.floor(len(val_loader) * 0.05), 1)
 
         for i, (x_img, y_img) in enumerate(train_loader):
             # NOTE(Nic): We use the sample_index as the global step for indexing our metrics
             # NOTE(Nic): We report batch statistics for the last segment in each train batch, but only validation averages.
             sample_index = epoch * train_loader_length + i
             x_seq, y_seq = tokenizer(x_img, y_img)
+            x_seq = x_seq.to(device)
+            y_seq = y_seq.to(device)
 
             z = hrm.initial_state(x_seq)
 
@@ -240,7 +255,7 @@ def train_loop(
                 loss_bg = " " * (14 * M - 2 - len(loss_list))
 
                 print(
-                    f"[trn] epoch: {epoch}/{epochs} | iter: ({i}/{num_batches})[{m}/{M}] | norm: {grad_norm:.3f} | segs: {loss_list + loss_bg}"
+                    f"[trn] epoch: {epoch}/{target_epochs} | iter: ({i}/{len(train_loader)})[{m}/{M}] | norm: {grad_norm:.3f} | segs: {loss_list + loss_bg}"
                     + " " * 10,
                     end="\r",
                 )
@@ -280,11 +295,11 @@ def train_loop(
 
             # NOTE(Nic): periodically log some images out for reference.
 
-            if (i + 1) % vis_every == 0:
+            if (i + 1) % vis_every_train == 0:
 
                 num_samples = 5
                 y_pred_indices = torch.argmax(y_pred, dim=-1)
-                y_pred_imgs = tokenizer.untokenize(y_pred_indices, y_seq)
+                y_pred_imgs = tokenizer.untokenize(y_pred_indices, y_seq).cpu()
                 debug_image_arr = torch.concat(
                     (x_img[:num_samples], y_pred_imgs[:num_samples]), dim=0
                 )
@@ -305,7 +320,7 @@ def train_loop(
         ]
 
         print(
-            f"\n[trn] epoch: {epoch}/{epochs} | seg {M} avg loss: {avg_trn_loss:.4f} | seg {M} avg acc: {avg_trn_acc*100:.1f}%"
+            f"\n[trn] epoch: {epoch}/{target_epochs} | seg {M}:  {avg_trn_loss:.4f} ({avg_trn_acc*100:.1f}%)"
         )
 
         hrm.eval()
@@ -313,6 +328,8 @@ def train_loop(
         with torch.no_grad():
             for i, (x_val_img, y_val_img) in enumerate(val_loader):
                 x_val_seq, y_val_seq = tokenizer(x_val_img, y_val_img)
+                x_val_seq = x_val_seq.to(device)
+                y_val_seq = y_val_seq.to(device)
                 z_val = hrm.initial_state(x_val_seq)
 
                 segment_losses.clear()
@@ -340,18 +357,18 @@ def train_loop(
                 )
 
                 print(
-                    f"[val] epoch: {epoch}/{epochs} | iter: {i}/{len(val_loader)} | seg {M}: {val_loss.item():.4f} ({val_acc.item()*100:.1f}%)"
+                    f"[val] epoch: {epoch}/{target_epochs} | iter: {i}/{len(val_loader)} | seg {M}: {val_loss.item():.4f} ({val_acc.item()*100:.1f}%)"
                     + " " * 10,
                     end="\r",
                 )
 
                 # NOTE(Nic): occasionally save some val images
-                if (i + 1) % vis_every == 0:
+                if (i + 1) % vis_every_val == 0:
                     num_samples = 5
                     y_val_pred_indices = torch.argmax(y_val_pred, dim=-1)
                     y_val_pred_imgs = tokenizer.untokenize(
                         y_val_pred_indices, y_val_seq
-                    )
+                    ).cpu()
                     val_debug_image_arr = torch.concat(
                         (x_val_img[:num_samples], y_val_pred_imgs[:num_samples]), dim=0
                     )
@@ -378,7 +395,7 @@ def train_loop(
             )
 
             print(
-                f"\n[val] epoch: {epoch}/{epochs} | avg loss: {avg_val_loss[f"val/segment-{M}-avg-loss"]:.4f} | avg acc: {avg_val_acc[f"val/segment-{M}-avg-acc"]*100:.1f}%"
+                f"\n[val] epoch: {epoch}/{target_epochs} | avg loss: {avg_val_loss[f"val/segment-{M}-avg-loss"]:.4f} | avg acc: {avg_val_acc[f"val/segment-{M}-avg-acc"]*100:.1f}%"
             )
 
             # NOTE(Nic): send the epoch summary stats over for both validation and training
@@ -387,7 +404,6 @@ def train_loop(
             wandb_run.log(
                 data=val_log_data,
                 step=sample_index,
-                # NOTE(Nic): if we're on the last train sample, don't commit yet, cause we have val data to add later.
                 commit=True,
             )
 

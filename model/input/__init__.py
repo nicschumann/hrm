@@ -19,10 +19,13 @@ class InputNetwork(nn.Module):
 
     def forward(self, tokens: torch.Tensor) -> torch.Tensor:
         B, S = tokens.shape
+        device = tokens.device
 
         # NOTE(Nic): sqrt scaling is not explicitly mentioned in the paper
         x = self.emb(tokens) * math.sqrt(self.d_model)
-        x += self.pos(torch.arange(S, dtype=torch.long)) * math.sqrt(self.d_model)
+        x += self.pos(torch.arange(S, dtype=torch.long, device=device)) * math.sqrt(
+            self.d_model
+        )
         x = self.proj(x)
 
         return x

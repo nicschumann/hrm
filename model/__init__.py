@@ -133,7 +133,12 @@ def accuracies(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
 
 
 def get_device() -> str:
-    return "mps" if torch.mps.is_available() else "cpu"
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps" if torch.mps.is_available() else "cpu"
+    )
+    return device
 
 
 def train_loop(

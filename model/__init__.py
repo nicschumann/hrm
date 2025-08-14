@@ -152,6 +152,9 @@ def train_loop(
 ):
 
     device = get_device()
+    if device == "cuda":
+        print("compiling model...")
+        hrm = torch.compile(hrm)  # type: ignore
 
     train_config = TrainConfig(lr=1e-4, batch_size=128, epochs=epochs)
 
@@ -183,6 +186,9 @@ def train_loop(
             "hrm/N": hrm.config.N,
             "hrm/T": hrm.config.T,
             "hrm/M": M,
+            "hrm/n_layers": hrm.config.n_layers,
+            "hrm/n_heads": hrm.config.d_model,
+            "hrm/d_ff": hrm.config.d_ff,
             "maze-dims": (9, 9),
             "train-samples": num_train_samples,
             "val-samples": num_val_samples,

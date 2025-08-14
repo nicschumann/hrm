@@ -13,7 +13,13 @@ if __name__ == "__main__":
     tokenizer = MazeTokenizer()
 
     hrm = HRM(
-        HRMConfig(len(InputTokens), len(OutputTokens), d_model, max_seq_len=max_seq)
+        HRMConfig(
+            input_vocab_size=len(InputTokens),
+            output_vocab_size=len(OutputTokens),
+            n_layers=2,
+            d_model=d_model,
+            max_seq_len=max_seq,
+        )
     )
 
     print(f"hrm params: {sum(p.numel() for p in hrm.parameters()):,}")
